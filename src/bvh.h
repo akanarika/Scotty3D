@@ -114,6 +114,8 @@ class BVHAccel : public Aggregate {
    */
   void drawOutline(const Color& c) const {}
 
+  void buildBVH(const BBox bb, BVHNode *top, const size_t bucketNum, const size_t max_leaf_size);
+
  private:
   BVHNode* root;  ///< root node of the BVH
 };

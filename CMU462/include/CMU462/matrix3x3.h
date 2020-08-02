@@ -31,6 +31,13 @@ class Matrix3x3 {
       }
     }
   }
+    
+  Matrix3x3(Vector3D a, Vector3D b, Vector3D c)
+  {
+      (*this)[0] = a;
+      (*this)[1] = b;
+      (*this)[2] = c;
+  }
 
   /**
    * Sets all elements to val.

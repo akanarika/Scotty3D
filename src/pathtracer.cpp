@@ -24,7 +24,7 @@ using std::max;
 
 namespace CMU462 {
 
-// #define ENABLE_RAY_LOGGING 1
+//#define ENABLE_RAY_LOGGING 1
 
 PathTracer::PathTracer(size_t ns_aa, size_t max_ray_depth, size_t ns_area_light,
                        size_t ns_diff, size_t ns_glsy, size_t ns_refr,
@@ -419,7 +419,7 @@ Spectrum PathTracer::trace_ray(const Ray &r) {
   // indirect lighting components calculated in the code below. The starter
   // code overwrites L_out by (.5,.5,.5) so that you can test your geometry
   // queries before you implement path tracing.
-  L_out = Spectrum(5.f, 5.f, 5.f);
+  // L_out = Spectrum(5.f, 5.f, 5.f);
 
   Vector3D hit_p = r.o + r.d * isect.t;
   Vector3D hit_n = isect.n;
@@ -436,7 +436,7 @@ Spectrum PathTracer::trace_ray(const Ray &r) {
   w_out.normalize();
 
 
-  if (!isect.bsdf->is_delta()) {
+  //if (!isect.bsdf->is_delta()) {
     Vector3D dir_to_light;
     float dist_to_light;
     float pr;
@@ -446,6 +446,7 @@ Spectrum PathTracer::trace_ray(const Ray &r) {
 
       // no need to take multiple samples from a point/directional source
       int num_light_samples = light->is_delta_light() ? 1 : ns_area_light;
+      double scale = 1.0 / num_light_samples;
 
       // integrate light over the hemisphere about the normal
       for (int i = 0; i < num_light_samples; i++) {
@@ -460,11 +461,11 @@ Spectrum PathTracer::trace_ray(const Ray &r) {
         // convert direction into coordinate space of the surface, where
         // the surface normal is [0 0 1]
         const Vector3D& w_in = w2o * dir_to_light;
-        if (w_in.z < 0) continue;
+        // if (w_in.z < 0) continue;
 
           // note that computing dot(n,w_in) is simple
         // in surface coordinates since the normal is (0,0,1)
-        double cos_theta = w_in.z;
+        double cos_theta = std::max(0.0, w_in.z);
           
         // evaluate surface bsdf
         const Spectrum& f = isect.bsdf->f(w_out, w_in);
@@ -472,28 +473,36 @@ Spectrum PathTracer::trace_ray(const Ray &r) {
         // TODO (PathTracer):
         // (Task 4) Construct a shadow ray and compute whether the intersected surface is
         // in shadow. Only accumulate light if not in shadow.
-        L_out += (cos_theta / (num_light_samples * pr)) * f * light_L;
+        Ray shdRay(hit_p + EPS_D * dir_to_light, dir_to_light, dist_to_light - EPS_D);
+        if (bvh->intersect(shdRay)) continue;
+
+        L_out += f * light_L * (cos_theta / pr);
       }
+      L_out *= scale;
     }
-  }
+    return L_out;//Spectrum(hit_n.x, hit_n.y, hit_n.z);
+  //}
 
   // TODO (PathTracer):
   // ### (Task 5) Compute an indirect lighting estimate using pathtracing with Monte Carlo.
-
-
-  // Note that Ray objects have a depth field now; you should use this to avoid
-  // traveling down one path forever.
+  if(r.depth >= max_ray_depth) return L_out;
   
-  // (1) randomly select a new ray direction (it may be
-  // reflection or transmittence ray depending on
-  // surface type -- see BSDF::sample_f()
-
-  // (2) potentially terminate path (using Russian roulette)
-
-  // (3) evaluate weighted reflectance contribution due 
-  // to light from this direction
-
-  return L_out;
+  Spectrum Lo = L_out;
+  
+  Vector3D wi;
+  Spectrum f = isect.bsdf->sample_f(w_out, &wi, &pr);
+  
+  double terminateProbability = clamp(1.0 - f.illum(),0.0, 1.0);
+  if(std::rand()/(double)RAND_MAX < terminateProbability) return Lo;
+  
+  Vector3D w_in = o2w * wi;
+  w_in.normalize();
+  double cost = wi[2];
+  Ray nRay(hit_p + EPS_D * w_in, w_in, INF_D);
+  nRay.depth = r.depth + 1;
+  
+  return Lo + (f * trace_ray(nRay) * (fabs(cost) / (pr*(1-terminateProbability))) );
+  //return L_out;
 }
 
 Spectrum PathTracer::raytrace_pixel(size_t x, size_t y) {
@@ -502,9 +511,18 @@ Spectrum PathTracer::raytrace_pixel(size_t x, size_t y) {
   // The sample rate is given by the number of camera rays per pixel.
 
   int num_samples = ns_aa;
+  size_t w = frameBuffer.w;
+  size_t h = frameBuffer.h;
+  Spectrum sum(0,0,0);
 
-  Vector2D p = Vector2D(0.5, 0.5);
-  return trace_ray(camera->generate_ray(p.x, p.y));
+  for(int i=0; i<num_samples; i++){
+      Vector2D s = gridSampler->get_sample();
+      double px = (x + s.x) / w;
+      double py = (y + s.y) / h;
+      sum += trace_ray(camera->generate_ray(px, py));
+  }
+  
+  return (sum * (double)(1.0 / (double)num_samples));
 }
 
 void PathTracer::raytrace_tile(int tile_x, int tile_y, int tile_w, int tile_h) {
